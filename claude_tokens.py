@@ -22,26 +22,26 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 PROJECTS = Path.home() / ".claude" / "projects"
-WINDOW_H = 5           # Claude Code: 5-часовое сессионное окно
+WINDOW_H = 5           # Claude Code: 5-hour session window
 WEEKLY_DAYS = 7
 
-# ─── API-режим: реальные данные с сервера Anthropic ────────────────────────
-# Тот же endpoint что использует приложение Claude Usage.app и claude.ai/settings/usage.
-# Возвращает utilization (%) и точное время сброса — без локального угадывания.
+# ─── API mode: real data from Anthropic server ─────────────────────────────
+# Same endpoint that Claude Usage.app and claude.ai/settings/usage use.
+# Returns utilization (%) and exact reset time — no local guessing.
 
 API_CACHE_FILE = Path.home() / ".claude" / "usage_api_cache.json"
-API_CACHE_TTL = 120  # секунд — API жёстко rate-limit'ит 429, нужна пауза между запросами
+API_CACHE_TTL = 120  # seconds — API rate-limits hard with 429, need a pause between requests
 
 def fetch_api_usage():
-    """Дёргает Anthropic OAuth usage endpoint с кешем 60с. Возвращает dict или None."""
-    # 1. Пробуем кеш
+    """Pulls Anthropic OAuth usage endpoint with 60s cache. Returns dict or None."""
+    # 1. Try cache
     try:
         cache = json.loads(API_CACHE_FILE.read_text())
         if time.time() - cache.get("fetched_at", 0) < API_CACHE_TTL:
             return cache.get("data")
     except Exception:
         pass
-    # 2. Свежий запрос
+    # 2. Fresh request
     try:
         token_json = subprocess.check_output(
             ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
@@ -60,7 +60,7 @@ def fetch_api_usage():
         API_CACHE_FILE.write_text(json.dumps({"fetched_at": time.time(), "data": data}))
         return data
     except Exception:
-        # При 429/ошибке — возвращаем stale-кеш если есть
+        # On 429/error — return stale cache if any
         try:
             return json.loads(API_CACHE_FILE.read_text()).get("data")
         except Exception:
@@ -68,12 +68,12 @@ def fetch_api_usage():
 
 
 def build_report_api(api_data, rows_week, limits, now):
-    """Строит отчёт из API-данных (точные %) + локальные абсолюты из JSONL."""
+    """Builds report from API data (exact %) + local absolutes from JSONL."""
     five = api_data.get("five_hour") or {}
     seven = api_data.get("seven_day") or {}
     seven_sonnet = api_data.get("seven_day_sonnet") or {}
 
-    # Локальный подсчёт — для абсолютных чисел токенов (API их не даёт)
+    # Local count — for absolute token numbers (API doesn't provide them)
     rep_local = build_report(rows_week, limits, now)
     q = get_quotas()
 
@@ -87,7 +87,7 @@ def build_report_api(api_data, rows_week, limits, now):
     ws_reset_at = parse_reset(seven_sonnet.get("resets_at"))
 
     def pct_to_fields(util, reset_at, quota, local_eff):
-        # Если utilization >0 — используем его для расчёта eff; иначе берём локальный
+        # If utilization > 0 — use it to derive eff; otherwise fall back to local
         eff = int(util * quota / 100) if util and util > 0 else local_eff
         return {
             "pct": float(util or 0.0),
@@ -146,8 +146,8 @@ def save_user_config(data):
 _USER_CFG = load_user_config()
 PLAN = _USER_CFG.get("plan") or os.environ.get("CLAUDE_PLAN", "max5")
 
-# Калибровка: ~/.claude/usage_calibration.json хранит откалиброванные квоты
-# (если есть — используется вместо PLAN_QUOTAS).
+# Calibration: ~/.claude/usage_calibration.json stores calibrated quotas
+# (if present — used instead of PLAN_QUOTAS).
 CALIB_FILE = Path.home() / ".claude" / "usage_calibration.json"
 
 def load_calibration():
@@ -178,7 +178,7 @@ except (ValueError, TypeError):
 
 
 def load_all_rows(since_utc):
-    """Возвращает (rows, limit_events): усовые запросы и моменты hit-limit."""
+    """Returns (rows, limit_events): usage rows and hit-limit timestamps."""
     rows = []; limits = []
     for jsonl in PROJECTS.rglob("*.jsonl"):
         try:
@@ -193,7 +193,7 @@ def load_all_rows(since_utc):
                 if t < since_utc: continue
                 msg = d.get("message", {})
 
-                # synthetic hit-limit событие
+                # synthetic hit-limit event
                 if msg.get("model") == "<synthetic>":
                     content = msg.get("content", "")
                     if isinstance(content, list):
@@ -225,13 +225,13 @@ def load_all_rows(since_utc):
 
 
 def find_current_session_block(rows, limits, now):
-    """Сессия начинается с первого реального запроса ПОСЛЕ последнего hit-limit
-    (если был), иначе — от первого запроса в непрерывном блоке с паузой ≤ 5ч."""
+    """Session starts at the first real request AFTER the last hit-limit
+    (if any), otherwise — at the first request in a continuous block with pause ≤ 5h."""
     if not rows: return None
 
     offset = timedelta(seconds=load_calibration().get("timer_offset_seconds", 0))
 
-    # Если был hit limit — сессия с первого запроса после него
+    # If there was a hit-limit — session starts after it
     if limits:
         last_limit = limits[-1]
         after = [r for r in rows if r["t"] > last_limit]
@@ -241,7 +241,7 @@ def find_current_session_block(rows, limits, now):
             if now <= end:
                 return {"start": start, "end": end, "rows": after}
 
-    # Иначе — скользящий блок от последнего большого gap
+    # Otherwise — sliding block from the last big gap
     block_start = rows[0]["t"]; block_rows = []
     for r in rows:
         if r["t"] - block_start > timedelta(hours=WINDOW_H):
@@ -265,7 +265,7 @@ def pct(used, quota):
 
 
 def next_weekly_reset(now, weekday, hour):
-    """Ближайший {weekday}(0=Mon..6=Sun) {hour}:00 в tz пользователя, возвращает UTC."""
+    """Next {weekday}(0=Mon..6=Sun) {hour}:00 in the user's tz, returns UTC."""
     user_now = now + timedelta(hours=USER_TZ_OFFSET_H)
     days_ahead = (weekday - user_now.weekday()) % 7
     target = user_now.replace(hour=hour, minute=0, second=0, microsecond=0) + timedelta(days=days_ahead)
@@ -275,13 +275,13 @@ def next_weekly_reset(now, weekday, hour):
 
 def fmt_reset(delta):
     total = int(delta.total_seconds())
-    if total < 0: return "сейчас"
+    if total < 0: return "now"
     d = total // 86400
     h = (total % 86400) // 3600
     m = (total % 3600) // 60
-    if d > 0: return f"{d}д {h}ч"
-    if h > 0: return f"{h}ч {m:02d}м"
-    return f"{m}м"
+    if d > 0: return f"{d}d {h}h"
+    if h > 0: return f"{h}h {m:02d}m"
+    return f"{m}m"
 
 
 def build_report(rows_week, limits, now):
@@ -333,23 +333,23 @@ def render(rep, compact=False):
     s = rep["session"]; wa = rep["w_all"]; ws = rep["w_sonnet"]
     now = datetime.now(timezone.utc)
     if compact:
-        return f"⚡ {s['pct']:.1f}% · {fmt(s['eff'])} · {s['reset_h']}ч{s['reset_m']:02d}м"
+        return f"⚡ {s['pct']:.1f}% · {fmt(s['eff'])} · {s['reset_h']}h{s['reset_m']:02d}m"
     lines = [
-        f"═══ Claude Code Usage · план {rep['plan']} ═══",
+        f"═══ Claude Code Usage · plan {rep['plan']} ═══",
         f"",
-        f"Current session ({s['start']} → +5ч):",
-        f"  Использовано:  {s['pct']:5.1f}%   {fmt(s['eff'])} / {fmt(s['quota'])}",
-        f"  Сброс через:   {s['reset_h']}ч {s['reset_m']:02d}м",
+        f"Current session ({s['start']} → +5h):",
+        f"  Used:          {s['pct']:5.1f}%   {fmt(s['eff'])} / {fmt(s['quota'])}",
+        f"  Resets in:     {s['reset_h']}h {s['reset_m']:02d}m",
         f"",
-        f"Weekly · All models (сброс {wa['reset'].astimezone().strftime('%a %H:%M')}):",
-        f"  Использовано:  {wa['pct']:5.1f}%   {fmt(wa['eff'])} / {fmt(wa['quota'])}",
-        f"  Сброс через:   {fmt_reset(wa['reset'] - now)}",
+        f"Weekly · All models (resets {wa['reset'].astimezone().strftime('%a %H:%M')}):",
+        f"  Used:          {wa['pct']:5.1f}%   {fmt(wa['eff'])} / {fmt(wa['quota'])}",
+        f"  Resets in:     {fmt_reset(wa['reset'] - now)}",
         f"",
-        f"Weekly · Sonnet only (сброс {ws['reset'].astimezone().strftime('%a %H:%M')}):",
-        f"  Использовано:  {ws['pct']:5.1f}%   {fmt(ws['eff'])} / {fmt(ws['quota'])}",
-        f"  Сброс через:   {fmt_reset(ws['reset'] - now)}",
+        f"Weekly · Sonnet only (resets {ws['reset'].astimezone().strftime('%a %H:%M')}):",
+        f"  Used:          {ws['pct']:5.1f}%   {fmt(ws['eff'])} / {fmt(ws['quota'])}",
+        f"  Resets in:     {fmt_reset(ws['reset'] - now)}",
         f"",
-        f"По моделям (сессия):",
+        f"By model (session):",
     ]
     for m, v in sorted(rep["models"].items(), key=lambda x: -x[1]):
         lines.append(f"  {m:<28} {fmt(v):>8}  ({pct(v, s['quota']):.1f}%)")
@@ -415,35 +415,34 @@ def main():
     week_ago = now - timedelta(days=WEEKLY_DAYS + 1)
     rows, limits = load_all_rows(week_ago)
 
-    # --calibrate-timer 4:34 — смещение session-reset (сайт показывает X, мы рассчитываем Y, offset = X-Y)
+    # --calibrate-timer 4:34 — adjust session-reset offset (site shows X, script computes Y, offset = X-Y)
     if "--calibrate-timer" in argv:
         i = argv.index("--calibrate-timer")
         try:
             hh, mm = argv[i+1].split(":")
             target_remaining = timedelta(hours=int(hh), minutes=int(mm))
         except:
-            print("Использование: --calibrate-timer Hч:ММ  (например 4:34)"); return
+            print("Usage: --calibrate-timer Hh:MM  (e.g. 4:34)"); return
         rep0 = build_report(rows, limits, now)
         if not rep0["session"]["eff"]:
-            print("Нет активной сессии для калибровки"); return
-        # Наш расчёт reset времени в минутах
+            print("No active session to calibrate"); return
         my_remaining = timedelta(hours=rep0["session"]["reset_h"], minutes=rep0["session"]["reset_m"])
         offset = target_remaining - my_remaining
         calib = load_calibration()
         calib["timer_offset_seconds"] = int(offset.total_seconds())
         save_calibration(calib)
-        print(f"✓ Калибровка таймера: offset = {int(offset.total_seconds())}с ({offset})")
-        print(f"  Сайт: {target_remaining}, скрипт: {my_remaining}")
+        print(f"✓ Timer calibration: offset = {int(offset.total_seconds())}s ({offset})")
+        print(f"  Site: {target_remaining}, script: {my_remaining}")
         return
 
-    # Команды калибровки: --calibrate-session 13
+    # Calibration commands: --calibrate-session 13
     for key, calib_key in [("--calibrate-session", "session"),
                            ("--calibrate-weekly", "weekly"),
                            ("--calibrate-sonnet", "weekly_sonnet")]:
         if key in argv:
             i = argv.index(key)
             try: target_pct = float(argv[i+1])
-            except: print(f"Использование: {key} <процент>"); return
+            except: print(f"Usage: {key} <percent>"); return
             rep0 = build_report(rows, limits, now)
             if calib_key == "session":
                 eff = rep0["session"]["eff"]
@@ -455,12 +454,12 @@ def main():
             calib = load_calibration()
             calib[calib_key] = new_quota
             save_calibration(calib)
-            print(f"✓ {calib_key} quota = {new_quota:,} (для {eff:,} tokens = {target_pct}%)")
-            print(f"  Сохранено в {CALIB_FILE}")
+            print(f"✓ {calib_key} quota = {new_quota:,} (for {eff:,} tokens = {target_pct}%)")
+            print(f"  Saved to {CALIB_FILE}")
             return
 
-    # По умолчанию пытаемся взять реальные данные с API (как Claude Usage.app).
-    # Fallback на локальный JSONL-подсчёт если API недоступен или передан --no-api.
+    # By default try real data from API (like Claude Usage.app).
+    # Fallback to local JSONL counting if API unavailable or --no-api passed.
     rep = None
     if "--no-api" not in args:
         api_data = fetch_api_usage()
@@ -473,16 +472,16 @@ def main():
         s = rep["session"]; wa = rep["w_all"]; ws = rep["w_sonnet"]
         print(render(rep, compact=True))
         print("---")
-        print(f"Session: {s['pct']:.1f}% · {fmt(s['eff'])} / {fmt(s['quota'])} · {s['reset_h']}ч{s['reset_m']:02d}м | size=12")
+        print(f"Session: {s['pct']:.1f}% · {fmt(s['eff'])} / {fmt(s['quota'])} · {s['reset_h']}h{s['reset_m']:02d}m | size=12")
         print(f"Weekly all: {wa['pct']:.1f}% · {fmt(wa['eff'])} / {fmt(wa['quota'])} · {fmt_reset(wa['reset']-now)} | size=12")
         print(f"Weekly sonnet: {ws['pct']:.1f}% · {fmt(ws['eff'])} / {fmt(ws['quota'])} · {fmt_reset(ws['reset']-now)} | size=12")
-        print(f"План: {rep['plan']} | color=gray size=11")
+        print(f"Plan: {rep['plan']} | color=gray size=11")
         print("---")
         for m, v in sorted(rep["models"].items(), key=lambda x: -x[1]):
             print(f"  {m}: {fmt(v)} ({pct(v, s['quota']):.1f}%) | size=11 color=gray")
         print("---")
-        print("Обновить | refresh=true")
-        print(f"Подробный отчёт | shell=python3 param1={Path(__file__).resolve()} terminal=true")
+        print("Refresh | refresh=true")
+        print(f"Full report | shell=python3 param1={Path(__file__).resolve()} terminal=true")
         return
 
     if "--live" in args:
@@ -499,10 +498,10 @@ def main():
                     rep = build_report(rows, limits, now)
                 os.system("clear")
                 print(render(rep))
-                print(f"\n⟳ 10с. Ctrl+C — выход. ({datetime.now().strftime('%H:%M:%S')})")
+                print(f"\n⟳ 10s. Ctrl+C to exit. ({datetime.now().strftime('%H:%M:%S')})")
                 time.sleep(10)
         except KeyboardInterrupt:
-            print("\nВыход.")
+            print("\nExit.")
         return
 
     print(render(rep))

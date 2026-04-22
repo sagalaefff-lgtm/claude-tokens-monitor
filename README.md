@@ -1,5 +1,10 @@
 # claude-tokens-monitor
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
+[![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-green.svg)]()
+
 Lightweight token-usage counter for [Claude Code](https://claude.com/claude-code) — shows your **current session** and **weekly** quota in real time, both in the terminal and in the macOS menu bar via [SwiftBar](https://swiftbar.app/).
 
 Mirrors what you see at <https://claude.ai/settings/usage> but works offline (reads `~/.claude/projects/*/*.jsonl`) and queries the same Anthropic OAuth `usage` endpoint that Claude Code itself uses for accurate utilization percentages.
@@ -83,7 +88,6 @@ By model (session):
   sonnet-4-6                85.7K  (1.8%)
 ```
 
-(The script's actual UI strings are in Russian; this is an illustrative translation. Localising the strings is a planned PR.)
 
 ## SwiftBar plugin
 
@@ -148,9 +152,9 @@ This matches how `ccusage` and `claude.ai` define a session.
 ## Contributing
 
 PRs welcome — especially:
-- Localising the UI to English / Spanish / etc. (currently Russian).
 - A Linux/Windows alternative for the API mode (Keychain-equivalent).
 - Native menu bar plugins for non-SwiftBar users (xbar, BitBar).
+- Localisation to additional languages (script UI is currently English-only).
 
 ## License
 
