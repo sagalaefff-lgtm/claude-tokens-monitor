@@ -1,0 +1,28 @@
+# Local user config (created by --setup) — never commit
+config.json
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test / cache artifacts
+*.cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Claude Code
+.claude/
