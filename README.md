@@ -31,7 +31,7 @@ Claude Code does not expose a programmatic way to monitor your remaining session
 
 ```bash
 # Clone or copy the script to a stable location
-git clone https://github.com/<your-username>/claude-tokens-monitor.git ~/.local/share/claude-tokens
+git clone https://github.com/sagalaefff-lgtm/claude-tokens-monitor.git ~/.local/share/claude-tokens
 chmod +x ~/.local/share/claude-tokens/claude_tokens.py
 ```
 
